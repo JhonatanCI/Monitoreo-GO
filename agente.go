@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"bytes"
+	"net/http"
 )
 
 type Metricas struct {
@@ -77,6 +79,44 @@ func obtenerUsoCPU() (float64, error) {
 	return uso, nil
 }
 
+func enviarMetricas(metricas Metricas) {
+	// Convertimos nuestro struct a JSON
+	jsonData, err := json.Marshal(metricas)
+	if err != nil {
+		log.Printf("Error al convertir métricas a JSON: %v", err)
+		return
+	}
+
+	// Definimos la URL de nuestro servidor central
+	url := "http://localhost:8080/api/metrics"
+
+	// Creamos la petición HTTP POST
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Error creando la petición: %v", err)
+		return
+	}
+
+	// Añadimos la cabecera para especificar que estamos enviando JSON
+	req.Header.Set("Content-Type", "application/json")
+
+	// Enviamos la petición
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Error enviando las métricas al servidor: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Verificamos si el servidor respondió con un '200 OK'
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("El servidor respondió con un estado no esperado: %s", resp.Status)
+	} else {
+		log.Println("Métricas enviadas exitosamente al servidor.")
+	}
+}
+
 
 func main() {
 	for {
@@ -94,18 +134,7 @@ func main() {
 			log.Printf("Error obteniendo uso de CPU: %v\n", errCPU)
 		}
 
-		// Convertimos nuestro struct a un slice de bytes en formato JSON
-		// MarshalIndent formatea el JSON para que sea legible por humanos (con sangría)
-		jsonData, err := json.MarshalIndent(metricas, "", "  ")
-		if err != nil {
-			log.Printf("Error al convertir a JSON: %v\n", err)
-			continue // Si no podemos crear el JSON, saltamos esta iteración
-		}
-
-		// Imprimimos el JSON en la consola
-		fmt.Println("--- Nuevas Métricas ---")
-		fmt.Println(string(jsonData))
-		
+		enviarMetricas(metricas)
 		time.Sleep(5 * time.Second)
 	}
 }
