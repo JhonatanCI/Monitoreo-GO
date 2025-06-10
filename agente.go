@@ -10,11 +10,45 @@ import (
 	"time"
 	"bytes"
 	"net/http"
+	"io"
 )
 
+const claveSecretaAgente = "un-secreto-muy-secreto-para-los-agentes"
 type Metricas struct {
 	UsoCPU   float64 `json:"uso_cpu"`
 	UsoDisco float64 `json:"uso_disco"`
+}
+
+func obtenerToken() (string, error) {
+	requestBody, err := json.Marshal(map[string]string{
+		"clave_secreta_agente": claveSecretaAgente,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	url := "http://localhost:8080/login"
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(requestBody))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("el servidor de login respondió con un estado no esperado: %s", resp.Status)
+	}
+    
+    // Leemos el cuerpo de la respuesta
+	body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return "", err
+    }
+    
+    // Parseamos el JSON de la respuesta para obtener el token
+    var result map[string]string
+    json.Unmarshal(body, &result)
+
+	return result["token"], nil
 }
 
 // obtenerUsoDisco ejecuta el comando 'df' y parsea su salida para obtener el porcentaje de uso.
@@ -79,7 +113,7 @@ func obtenerUsoCPU() (float64, error) {
 	return uso, nil
 }
 
-func enviarMetricas(metricas Metricas) {
+func enviarMetricas(metricas Metricas, token string) {
 	// Convertimos nuestro struct a JSON
 	jsonData, err := json.Marshal(metricas)
 	if err != nil {
@@ -98,6 +132,9 @@ func enviarMetricas(metricas Metricas) {
 	}
 
 	// Añadimos la cabecera para especificar que estamos enviando JSON
+	req.Header.Set("Content-Type", "application/json")
+
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	// Enviamos la petición
@@ -119,6 +156,12 @@ func enviarMetricas(metricas Metricas) {
 
 
 func main() {
+	log.Println("Intentando obtener token de autenticación...")
+	token, err := obtenerToken()
+	if err != nil {
+		log.Fatalf("Error crítico al obtener token, el agente no puede continuar: %v", err)
+	}
+	log.Println("Token obtenido exitosamente. Iniciando recolección de métricas.")
 	for {
 		metricas := Metricas{}
 		var errDisco, errCPU error
@@ -134,7 +177,7 @@ func main() {
 			log.Printf("Error obteniendo uso de CPU: %v\n", errCPU)
 		}
 
-		enviarMetricas(metricas)
+		enviarMetricas(metricas,token)
 		time.Sleep(5 * time.Second)
 	}
 }
